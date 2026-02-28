@@ -1,4 +1,5 @@
 let _initPhase = true;
+let _isRestoringState = false;
 const defaultImage = 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=300&h=200&fit=crop';
 const colorPickerRegistry = {};
 // ==================== 补全缺失的核心渲染函数 ====================
@@ -666,7 +667,10 @@ function getRenderObj(prop, isSent) {
 // ==========================================================
 
 function updateBubbleConfig(prop, value) {
-    if (prop === 'borderWidth') return;
+    // ★★★ 修复：移除 borderWidth 的拦截 ★★★
+    // 原来的 `if (prop === 'borderWidth') return;` 导致边框粗细永远无法更新
+    // borderWidth 作为四边对象，通过 updateFourSidesUniform/updateFourSides 更新
+    // 这里不应该拦截它的其他属性更新
 
     if (typeof value === 'string' && !isNaN(value) && value !== '' && prop !== 'fontUrl' && prop !== 'bgUrl' && prop !== 'decoUrl' && prop !== 'placeholderUrl' && prop !== 'placeholderSvg' && prop !== 'placeholderEmoji' && prop !== 'placeholderText' && prop !== 'bgSize' && prop !== 'borderStyle' && prop !== 'voiceTextBgUrl') {
         bubbleConfig[prop] = parseInt(value);
@@ -1049,13 +1053,13 @@ function getTailHtml(isSent) {
     
     let defaultColor;
     if (isSent) {
-        defaultColor = colorPickerRegistry['bubbleSentBg']?.gradientColors?.[0]?.color 
-| colorPickerRegistry['bubbleSentBg']?.color 
-| '#007AFF';
+        defaultColor = colorPickerRegistry['bubbleSentBg']?.gradientColors?.[0]?.color
+    || colorPickerRegistry['bubbleSentBg']?.color
+    || '#007AFF';
     } else {
-        defaultColor = colorPickerRegistry['bubbleRecvBg']?.gradientColors?.[0]?.color 
-| colorPickerRegistry['bubbleRecvBg']?.color 
-| '#F0F0F0';
+        defaultColor = colorPickerRegistry['bubbleRecvBg']?.gradientColors?.[0]?.color
+    || colorPickerRegistry['bubbleRecvBg']?.color
+    || '#F0F0F0';
     }
     fillValue = defaultColor;
     
@@ -1442,7 +1446,7 @@ if (bc.textBgEnabled && !bc.bgImageEnabled) {
 
     
 let borderCss = '';
-const bw = bc.borderWidth;
+const bw = getRenderObj('borderWidth', isSent);
 if (bw.unified ? bw.all > 0 : (bw.t > 0 || bw.r > 0 || bw.b > 0 || bw.l > 0)) {
     const borderColorKey = 'bubbleBorderColor';
     const borderColor = colorPickerRegistry[borderColorKey] ? cpGetCssValue(borderColorKey) : '#cccccc';
@@ -1886,7 +1890,11 @@ return `width: ${cfg.size}px; height: ${cfg.size}px; border-radius: ${cfg.radius
 }
 
 function getAvatarHtml(isSent, messageIndex = 0, totalMessages = 1) {
-    const mode = styleConfig.avatar.displayMode || 'all';
+    // ★ 修复：displayMode 是全局属性，应该从 overall 分支读取，不受 applyBranch 影响
+    const mode = (branchDB.overall && branchDB.overall.sc && branchDB.overall.sc.avatar) 
+        ? (branchDB.overall.sc.avatar.displayMode || 'all')
+        : (styleConfig.avatar.displayMode || 'all');
+    
     let shouldShow = true;
     
     switch(mode) {
@@ -1995,20 +2003,82 @@ function applyBranch(branch) {
 }
 setTimeout(initBranchDB, 50); // 确保其它数据都加载完毕后初始化库
 
-// 跨视图强制同步所有颜色选择器UI
 function forceSyncColorPickers() {
+    // === 颜色选择器同步 ===
     for (let key in colorPickerRegistry) {
         const c = colorPickerRegistry[key];
         const typeEl = document.getElementById(`cp-${key}-type`);
         if (typeEl) {
             typeEl.value = c.type;
-            const sEl = document.getElementById(`cp-${key}-solid`), gEl = document.getElementById(`cp-${key}-gradient`);
-            if(sEl) sEl.style.display = c.type === 'solid' ? '' : 'none';
-            if(gEl) gEl.style.display = c.type === 'gradient' ? '' : 'none';
-            const cEl = document.getElementById(`cp-${key}-color`), hEl = document.getElementById(`cp-${key}-hex`), oEl = document.getElementById(`cp-${key}-opacity`);
-            if (cEl) cEl.value = c.color; if (hEl) hEl.value = c.color; if (oEl) oEl.value = c.opacity;
-            if(typeof cpRenderGradientColors === 'function') cpRenderGradientColors(key);
-            if(typeof cpUpdateGradientPreview === 'function') cpUpdateGradientPreview(key);
+            const sEl = document.getElementById(`cp-${key}-solid`);
+            const gEl = document.getElementById(`cp-${key}-gradient`);
+            if (sEl) sEl.style.display = c.type === 'solid' ? '' : 'none';
+            if (gEl) gEl.style.display = c.type === 'gradient' ? '' : 'none';
+            const cEl = document.getElementById(`cp-${key}-color`);
+            const hEl = document.getElementById(`cp-${key}-hex`);
+            const oEl = document.getElementById(`cp-${key}-opacity`);
+            if (cEl) cEl.value = c.color;
+            if (hEl) hEl.value = c.color;
+            if (oEl) oEl.value = c.opacity;
+            if (c.type === 'gradient') {
+                if (typeof cpRenderGradientColors === 'function') cpRenderGradientColors(key);
+                if (typeof cpUpdateGradientPreview === 'function') cpUpdateGradientPreview(key);
+            }
+        }
+    }
+    
+    // === 阴影选择器同步 ===
+    for (let key in shadowPickerRegistry) {
+        const c = shadowPickerRegistry[key];
+        const enableEl = document.getElementById(`sp-${key}-enable`);
+        if (enableEl) {
+            enableEl.checked = c.enabled;
+            const bodyEl = document.getElementById(`sp-${key}-body`);
+            if (bodyEl) bodyEl.style.display = c.enabled ? '' : 'none';
+        }
+        
+        const typeEl = document.getElementById(`sp-${key}-type`);
+        if (typeEl) {
+            typeEl.value = c.type;
+            const solidEl = document.getElementById(`sp-${key}-solid`);
+            const gradEl = document.getElementById(`sp-${key}-gradient`);
+            if (solidEl) solidEl.style.display = c.type === 'solid' ? '' : 'none';
+            if (gradEl) gradEl.style.display = c.type === 'gradient' ? '' : 'none';
+        }
+        
+        const insetEl = document.getElementById(`sp-${key}-inset`);
+        if (insetEl) insetEl.checked = c.inset || false;
+        
+        const colorEl = document.getElementById(`sp-${key}-color`);
+        const hexEl = document.getElementById(`sp-${key}-hex`);
+        const opacityEl = document.getElementById(`sp-${key}-opacity`);
+        const opValEl = document.getElementById(`sp-${key}-opval`);
+        if (colorEl) colorEl.value = c.color;
+        if (hexEl) hexEl.value = c.color;
+        if (opacityEl) opacityEl.value = c.opacity;
+        if (opValEl) opValEl.textContent = c.opacity + '%';
+        
+        const xEl = document.getElementById(`sp-${key}-x`);
+        const yEl = document.getElementById(`sp-${key}-y`);
+        const blurEl = document.getElementById(`sp-${key}-blur`);
+        const spreadEl = document.getElementById(`sp-${key}-spread`);
+        const xiEl = document.getElementById(`sp-${key}-xinput`);
+        const yiEl = document.getElementById(`sp-${key}-yinput`);
+        const biEl = document.getElementById(`sp-${key}-blurinput`);
+        const siEl = document.getElementById(`sp-${key}-spreadinput`);
+        if (xEl) xEl.value = c.x;
+        if (yEl) yEl.value = c.y;
+        if (blurEl) blurEl.value = c.blur;
+        if (spreadEl) spreadEl.value = c.spread;
+        if (xiEl) xiEl.value = c.x;
+        if (yiEl) yiEl.value = c.y;
+        if (biEl) biEl.value = c.blur;
+        if (siEl) siEl.value = c.spread;
+        
+        if (c.type === 'gradient') {
+            const dirEl = document.getElementById(`sp-${key}-dir`);
+            if (dirEl) dirEl.value = c.direction;
+            spRenderColors(key);
         }
     }
 }
@@ -2024,7 +2094,8 @@ function forceSyncColorPickers() {
         const editorSection = document.getElementById('editorSection');
 
         
-        const spongebobEmoji = 'https://media.giphy.com/media/nDSlfqf0gn5g4/giphy.gif';
+        // 方案2：用一个更稳定的图床链接
+const spongebobEmoji = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/1f602.png';
         
 function getAvatarSvg(isSent) {
     if (isSent) {
@@ -3672,20 +3743,22 @@ function generateReplyPreview(side) {
 
 function getTextStyle(isSent) {
     const bc = bubbleConfig;
-    // 核心修改：如果是 sent，优先读取 fontSizeSent，否则读取兼容的 fontSize
-    let currentFontSize = isSent ? (bc.fontSizeSent || bc.fontSize) : (bc.fontSizeRecv || bc.fontSize);
+    
+    // ★★★ 修复：使用 fontSize 作为唯一真实来源 ★★★
+    // 在分支隔离机制下，切换到「我方」/「对方」Tab 时 bubbleConfig 已被 applyBranch 替换为对应分支的数据
+    // 所以直接读 bc.fontSize 即可，无需再区分 fontSizeSent/fontSizeRecv
+    let currentFontSize = bc.fontSize;
+    
     let style = `font-size: ${currentFontSize}px;`;
 
     if (bc.fontFamily) {
         style += `font-family: '${bc.fontFamily}', -apple-system, sans-serif;`;
     }
 
-    
     if (bc.fontWeight && bc.fontWeight !== 'normal') {
         style += `font-weight: ${bc.fontWeight};`;
     }
 
-    
     const fontColorKey = isSent ? 'fontColorSent' : 'fontColor';
     const isGradientText = colorPickerRegistry[fontColorKey] && cpIsGradient(fontColorKey);
     
@@ -3697,21 +3770,16 @@ function getTextStyle(isSent) {
         style += `color: ${isSent ? styleConfig.text.sentTextColor : styleConfig.text.receivedTextColor};`;
     }
 
-    
-
-if (bc.textBgEnabled) {
-    
-    if (isGradientText) {
-        var fallbackColor = colorPickerRegistry[fontColorKey]?.gradientColors?.[0]?.color || (isSent ? '#ffffff' : '#333333');
-        style = style.replace(/background-image:.*?;/g, '');
-        style = style.replace(/-webkit-background-clip:.*?;/g, '');
-        style = style.replace(/background-clip:.*?;/g, '');
-        style = style.replace(/-webkit-text-fill-color:.*?;/g, '');
-        style += 'color: ' + fallbackColor + '; -webkit-text-fill-color: ' + fallbackColor + ';';
+    if (bc.textBgEnabled) {
+        if (isGradientText) {
+            var fallbackColor = colorPickerRegistry[fontColorKey]?.gradientColors?.[0]?.color || (isSent ? '#ffffff' : '#333333');
+            style = style.replace(/background-image:.*?;/g, '');
+            style = style.replace(/-webkit-background-clip:.*?;/g, '');
+            style = style.replace(/background-clip:.*?;/g, '');
+            style = style.replace(/-webkit-text-fill-color:.*?;/g, '');
+            style += 'color: ' + fallbackColor + '; -webkit-text-fill-color: ' + fallbackColor + ';';
+        }
     }
-}
-    
-    
 
     return style;
 }
@@ -4334,7 +4402,31 @@ function generateExportCode() {
     
     // 拍下当前正在使用层的快照以免被我们破坏
     const backupState = snapshotCore(); 
+    applyBranch(branchDB.overall);
+    const globalChangedMap = {};
+    for (const key in _sectionStateExtractors) {
+        globalChangedMap[key] = sectionChanged(key);
+    }
     
+    // 也检查 sent/received 分支
+    if (branchDB.sent) {
+        applyBranch(branchDB.sent);
+        for (const key in _sectionStateExtractors) {
+            if (!globalChangedMap[key]) globalChangedMap[key] = sectionChanged(key);
+        }
+    }
+    if (branchDB.received) {
+        applyBranch(branchDB.received);
+        for (const key in _sectionStateExtractors) {
+            if (!globalChangedMap[key]) globalChangedMap[key] = sectionChanged(key);
+        }
+    }
+    
+    // 用缓存替换 sectionChanged
+    const _origSectionChanged = sectionChanged;
+    window.sectionChanged = function(name) {
+        return globalChangedMap[name] || false;
+    };
     // ============================================
     // [关键修复] 跨分支变动脏检测：挨个巡查三个分支
     // ============================================
@@ -4431,6 +4523,8 @@ function generateExportCode() {
     const encryptCodeArea = document.getElementById('encryptCodeArea');
     if (encryptCodeArea) encryptCodeArea.value = code;
     showCustomAlert('已成功生成独立适配的CSS双轨代码！', 'success', '生成成功');
+    window.sectionChanged = _origSectionChanged;
+    applyBranch(backupState);
 }
 
 
@@ -4625,7 +4719,7 @@ function _genTargetMessageSections(getColor, getShadow, sideObj) {
         const bgRaw = getColor(bgKey, '#007AFF');
         const textGrad = isTextGrad ? cpGetCssValue(fontColorKey) : '';
         const textColor = getColor(fontColorKey, '#ffffff');
-        let fontSizeKey = sideObj === 'sent' ? (bc.fontSizeSent || bc.fontSize) : (bc.fontSizeRecv || bc.fontSize);
+        let fontSizeKey = bc.fontSize;
 
         sections.push(`\n/* ========== 气泡样式 ========== */\n.message-bubble { padding: ${_getIsolatedCss(bc.padding)}; border-radius: ${_getIsolatedCss(bc.borderRadius)}; margin: ${_getIsolatedCss(bc.margin)}; font-size: ${fontSizeKey}px !important; line-height: 1.5; word-break: break-word; box-shadow: ${getShadow('bubbleShadow')}; transition: all 0.2s ease; position: relative; overflow: visible; ${bc.fontFamily ? `font-family: '${bc.fontFamily}', -apple-system, sans-serif !important;` : ''} ${bc.fontWeight && bc.fontWeight !== 'normal' ? `font-weight: ${bc.fontWeight} !important;` : ''} ${bc.bgImageEnabled && bc.bgUrl ? `background-image: url('${bc.bgUrl}') !important; background-size: ${bc.bgSize} !important; background-position: ${bc.bgPosition} !important; background-repeat: no-repeat !important;` : ''} }`);
         
@@ -5571,15 +5665,11 @@ function addToolbarItem() {
     renderPreviewToolbar();
 }
 
-// ================================================================
-// ==================== 撤回/恢复 ====================
-// ================================================================
 const undoStack = [];
 const redoStack = [];
 const MAX_UNDO = 30;
 let _lastSavedState = '';
-let _undoDebounceTimer = null;
-let _stateBeforeSlide = ''; // 滑动开始前的状态
+let _undoSaveTimer = null;
 
 function getGlobalState() {
     try {
@@ -5588,283 +5678,638 @@ function getGlobalState() {
             bubbleConfig: bubbleConfig,
             styleConfig: styleConfig,
             decorationItems: decorationItems,
-            tailConfig: tailConfig
-            // 移除 colorPickerRegistry 和 shadowPickerRegistry，太大了
+            tailConfig: tailConfig,
+            colorPickerRegistry: colorPickerRegistry,     // ★ 加回来
+            shadowPickerRegistry: shadowPickerRegistry,   // ★ 加回来
+            branchDB: branchDB,                           // ★ 加入分支数据
+            activeBranch: activeBranch,
+            toolbarLayout: toolbarLayout
         });
-    } catch(e) {
+    } catch (e) {
+        console.error('Undo snapshot error:', e);
         return '';
     }
 }
 
 
-let _undoSaveTimer = null;
+
 function saveGlobalUndoState() {
+    saveUndoState();
+}
+function saveUndoState() {
     if (_initPhase) return;
-    
-    // 防抖：500ms内多次操作只保存一次
+
     if (_undoSaveTimer) clearTimeout(_undoSaveTimer);
     _undoSaveTimer = setTimeout(() => {
         const currentState = getGlobalState();
-        if (currentState === _lastSavedState) return;
-        
+        if (!currentState || currentState === _lastSavedState) return;
+
         if (_lastSavedState) {
             undoStack.push(_lastSavedState);
             if (undoStack.length > MAX_UNDO) undoStack.shift();
-            redoStack.length = 0;
+            redoStack.length = 0; // 新操作清空重做栈
         }
         _lastSavedState = currentState;
         updateUndoRedoButtons();
-    }, 400);
-}
-function saveUndoState() {
-    saveGlobalUndoState();
+    }, 300);
 }
 
 function undoAction() {
-    if (undoStack.length === 0) return;
-    redoStack.push(getGlobalState());
+    if (undoStack.length === 0) {
+        showCustomAlert('没有可撤回的操作', 'info', '提示');
+        return;
+    }
+
+    // 保存当前状态到重做栈
+    const currentState = getGlobalState();
+    if (currentState) redoStack.push(currentState);
+
+    // 取出上一个状态
     const prev = undoStack.pop();
-    _initPhase = true; // 防止恢复时触发更新
+
+    // ★★★ 修复：不再使用 _initPhase 包裹，改用专用标志 ★★★
+    _isRestoringState = true;
     applyGlobalState(prev);
-    _initPhase = false;
+    _isRestoringState = false;
+
     _lastSavedState = prev;
     updateUndoRedoButtons();
+    
+    // ★★★ 修复：恢复完成后强制刷新界面 ★★★
     updatePreview();
+    applyGlobalLayoutToPreview();
 }
 
 function redoAction() {
-    if (redoStack.length === 0) return;
-    undoStack.push(getGlobalState());
+    if (redoStack.length === 0) {
+        showCustomAlert('没有可重做的操作', 'info', '提示');
+        return;
+    }
+
+    // 保存当前状态到撤回栈
+    const currentState = getGlobalState();
+    if (currentState) undoStack.push(currentState);
+
+    // 取出下一个状态
     const next = redoStack.pop();
-    _initPhase = true;
+
+    _isRestoringState = true;
     applyGlobalState(next);
-    _initPhase = false;
+    _isRestoringState = false;
+
     _lastSavedState = next;
     updateUndoRedoButtons();
+    
+    // ★★★ 修复：恢复完成后强制刷新界面 ★★★
     updatePreview();
+    applyGlobalLayoutToPreview();
 }
 
 function applyGlobalState(stateStr) {
     if (!stateStr) return;
     try {
         const state = JSON.parse(stateStr);
-        
-        // 深拷贝赋值
-        const bc = state.bubbleConfig;
-        for (const key in bc) {
-            bubbleConfig[key] = bc[key];
+
+        // 1. 恢复基础配置
+        for (const key in state.bubbleConfig) {
+            bubbleConfig[key] = typeof state.bubbleConfig[key] === 'object' && state.bubbleConfig[key] !== null
+                ? JSON.parse(JSON.stringify(state.bubbleConfig[key]))
+                : state.bubbleConfig[key];
         }
-        const sc = state.styleConfig;
-        for (const key in sc) {
-            if (typeof sc[key] === 'object' && sc[key] !== null) {
-                styleConfig[key] = JSON.parse(JSON.stringify(sc[key]));
-            } else {
-                styleConfig[key] = sc[key];
+
+        for (const key in state.styleConfig) {
+            styleConfig[key] = typeof state.styleConfig[key] === 'object' && state.styleConfig[key] !== null
+                ? JSON.parse(JSON.stringify(state.styleConfig[key]))
+                : state.styleConfig[key];
+        }
+
+        // 2. 恢复颜色和阴影注册表
+        if (state.colorPickerRegistry) {
+            for (const key in colorPickerRegistry) {
+                if (!state.colorPickerRegistry[key]) delete colorPickerRegistry[key];
+            }
+            for (const key in state.colorPickerRegistry) {
+                colorPickerRegistry[key] = JSON.parse(JSON.stringify(state.colorPickerRegistry[key]));
             }
         }
-        toolbarItems = state.toolbarItems;
-        decorationItems = state.decorationItems || [];
-if (state.tailConfig) {
-    for (const key in state.tailConfig) {
-        tailConfig[key] = state.tailConfig[key];
-    }
-}
-        // 恢复颜色选择器和阴影选择器
-if (state.colorPickerRegistry) {
-    for (const key in state.colorPickerRegistry) {
-        colorPickerRegistry[key] = JSON.parse(JSON.stringify(state.colorPickerRegistry[key]));
-    }
-}
-if (state.shadowPickerRegistry) {
-    for (const key in state.shadowPickerRegistry) {
-        shadowPickerRegistry[key] = JSON.parse(JSON.stringify(state.shadowPickerRegistry[key]));
-    }
-}
-        
-        // 同步所有UI控件
+
+        if (state.shadowPickerRegistry) {
+            for (const key in shadowPickerRegistry) {
+                if (!state.shadowPickerRegistry[key]) delete shadowPickerRegistry[key];
+            }
+            for (const key in state.shadowPickerRegistry) {
+                shadowPickerRegistry[key] = JSON.parse(JSON.stringify(state.shadowPickerRegistry[key]));
+            }
+        }
+
+        // 3. 恢复分支数据
+        if (state.branchDB) {
+            branchDB.overall = state.branchDB.overall ? JSON.parse(JSON.stringify(state.branchDB.overall)) : null;
+            branchDB.sent = state.branchDB.sent ? JSON.parse(JSON.stringify(state.branchDB.sent)) : null;
+            branchDB.received = state.branchDB.received ? JSON.parse(JSON.stringify(state.branchDB.received)) : null;
+        }
+
+        if (state.activeBranch) {
+            activeBranch = state.activeBranch;
+        }
+
+        // 4. 恢复工具栏
+        if (state.toolbarItems) {
+            toolbarItems = JSON.parse(JSON.stringify(state.toolbarItems));
+        }
+        if (state.toolbarLayout) {
+            Object.assign(toolbarLayout, state.toolbarLayout);
+        }
+
+        // 5. 恢复装饰与尾巴
+        decorationItems = state.decorationItems ? JSON.parse(JSON.stringify(state.decorationItems)) : [];
+        if (state.tailConfig) {
+            for (const key in state.tailConfig) {
+                tailConfig[key] = state.tailConfig[key];
+            }
+        }
+
+        // 6. 全面刷新 UI 控件（不触发 updatePreview）
         syncAllUIControls();
-        
+        forceSyncColorPickers();
         renderToolbarItemsList();
         renderPreviewToolbar();
         renderDecorationList();
-        
-        _initPhase = true;
-        _initPhase = false;
-        
-        let html = generateTimestampPreview();
-        html += generateAllMessages();
-        previewMessages.innerHTML = html;
-        renderPreviewToolbar();
-    } catch(e) {
-        console.error('Undo state parse error', e);
+        renderBubbleDecoList();
+        renderTransferDecoList();
+
+        // ★★★ 修复：不在这里调用 updatePreview，由外部调用者负责 ★★★
+
+    } catch (e) {
+        console.error('Undo restore error:', e);
+        showCustomAlert('恢复状态时出错', 'error', '撤回失败');
     }
 }
 
-// 同步所有UI控件到当前数据状态
 function syncAllUIControls() {
     const bc = bubbleConfig;
     const sc = styleConfig;
-    
-    // 我们必须获取到当面处于活跃状态的配置层，防止覆盖错误
-    const activeRadius = getActiveObj('borderRadius');
-    const activePadding = getActiveObj('padding');
-    const activeMargin = getActiveObj('margin');
-    const activeBorderW = getActiveObj('borderWidth');
+    const tc = tailConfig;
 
+    // ============ 1. 气泡基础 ============
     // 字体大小
-    const fss = document.getElementById('font-size-slider');
-    const fsi = document.getElementById('font-size-input');
-    if (fss) fss.value = bc.fontSize;
-    if (fsi) fsi.value = bc.fontSize;
-    
-    // 圆角统一回写
-    const brSlider = document.getElementById('br-all-slider');
-    const brInput = document.getElementById('br-all-input');
-    if (brSlider) brSlider.value = activeRadius.all;
-    if (brInput) brInput.value = activeRadius.all;
-    
-    // 内边距回写
-    const padSlider = document.getElementById('pad-all-slider');
-    const padInput = document.getElementById('pad-all-input');
-    if (padSlider) padSlider.value = activePadding.all;
-    if (padInput) padInput.value = activePadding.all;
-    
-    // 外边距回写
-    const marSlider = document.getElementById('mar-all-slider');
-    const marInput = document.getElementById('mar-all-input');
-    if (marSlider) marSlider.value = activeMargin.all;
-    if (marInput) marInput.value = activeMargin.all;
-    
-    // 边框粗细回写
-    const bwSlider = document.getElementById('bw-all-slider');
-    const bwInput = document.getElementById('bw-all-input');
-    if (bwSlider) bwSlider.value = activeBorderW.all;
-    if (bwInput) bwInput.value = activeBorderW.all;
+    syncRangeAndInput('font-size-slider', 'font-size-input', bc.fontSize);
 
-    
-    // 头像设置
-    const avSizeSlider = document.getElementById('avatar-size-slider');
-    const avSizeInput = document.getElementById('avatar-size-input');
-    if (avSizeSlider) avSizeSlider.value = sc.avatar.size;
-    if (avSizeInput) avSizeInput.value = sc.avatar.size;
-    
-    const avRadiusSlider = document.getElementById('avatar-radius-slider');
-    const avRadiusInput = document.getElementById('avatar-radius-input');
-    if (avRadiusSlider) avRadiusSlider.value = sc.avatar.radius;
-    if (avRadiusInput) avRadiusInput.value = sc.avatar.radius;
-    
-    const avPosXSlider = document.getElementById('avatar-pos-x-slider');
-    const avPosXInput = document.getElementById('avatar-pos-x-input');
-    if (avPosXSlider) avPosXSlider.value = sc.avatar.position.x;
-    if (avPosXInput) avPosXInput.value = sc.avatar.position.x;
-    
-    const avPosYSlider = document.getElementById('avatar-pos-y-slider');
-    const avPosYInput = document.getElementById('avatar-pos-y-input');
-    if (avPosYSlider) avPosYSlider.value = sc.avatar.position.y;
-    if (avPosYInput) avPosYInput.value = sc.avatar.position.y;
-    
+    // 字体粗细
+    setInputValue('font-weight-select', bc.fontWeight);
+
+    // 字体URL
+    setInputValue('font-url', bc.fontUrl);
+
+    // 圆角
+    syncRangeAndInput('br-all-slider', 'br-all-input', bc.borderRadius.all);
+    setInputValue('br-tl', bc.borderRadius.tl);
+    setInputValue('br-tr', bc.borderRadius.tr);
+    setInputValue('br-br', bc.borderRadius.br);
+    setInputValue('br-bl', bc.borderRadius.bl);
+    toggleFourSidesUIOnly('borderRadius', bc.borderRadius.unified);
+
+    // 内边距
+    syncRangeAndInput('pad-all-slider', 'pad-all-input', bc.padding.all);
+    setInputValue('pad-t', bc.padding.t);
+    setInputValue('pad-r', bc.padding.r);
+    setInputValue('pad-b', bc.padding.b);
+    setInputValue('pad-l', bc.padding.l);
+    toggleFourSidesUIOnly('padding', bc.padding.unified);
+
+    // 外边距
+    syncRangeAndInput('mar-all-slider', 'mar-all-input', bc.margin.all);
+    setInputValue('mar-t', bc.margin.t);
+    setInputValue('mar-r', bc.margin.r);
+    setInputValue('mar-b', bc.margin.b);
+    setInputValue('mar-l', bc.margin.l);
+    toggleFourSidesUIOnly('margin', bc.margin.unified);
+
+    // 边框粗细
+    syncRangeAndInput('bw-all-slider', 'bw-all-input', bc.borderWidth.all);
+    setInputValue('bw-t', bc.borderWidth.t);
+    setInputValue('bw-r', bc.borderWidth.r);
+    setInputValue('bw-b', bc.borderWidth.b);
+    setInputValue('bw-l', bc.borderWidth.l);
+    toggleFourSidesUIOnly('borderWidth', bc.borderWidth.unified);
+
+    // 边框样式
+    setInputValue('border-style-select', bc.borderStyle);
+
+    // ============ 2. 气泡背景图开关 ============
+    setCheckbox('bubble-bg-toggle', bc.bgImageEnabled);
+    const bgSettings = document.getElementById('bubble-bg-settings');
+    const colorSection = document.getElementById('bubble-color-section');
+    if (bgSettings) bgSettings.style.display = bc.bgImageEnabled ? 'block' : 'none';
+    if (colorSection) colorSection.style.display = bc.bgImageEnabled ? 'none' : 'block';
+    setInputValue('bubble-bg-url', bc.bgUrl);
+    setInputValue('bubble-bg-size', bc.bgSize);
+
+    // 背景位置按钮激活状态
+    document.querySelectorAll('#bubble-bg-position-grid .pos-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.pos === bc.bgPosition);
+    });
+
+    // ============ 3. 文字背景开关 ============
+    setCheckbox('text-bg-toggle', bc.textBgEnabled);
+    const textBgSettings = document.getElementById('text-bg-settings');
+    if (textBgSettings) textBgSettings.style.display = bc.textBgEnabled ? 'block' : 'none';
+    setInputValue('text-bg-url', bc.textBgUrl);
+
+    // 文字背景尺寸/偏移
+    syncRangeAndInput('text-bg-width', 'text-bg-width-input', bc.textBgWidth || 0);
+    syncRangeAndInput('text-bg-height', 'text-bg-height-input', bc.textBgHeight || 0);
+    syncRangeAndInput('text-bg-offset-x', 'text-bg-offset-x-input', bc.textBgOffsetX || 0);
+    syncRangeAndInput('text-bg-offset-y', 'text-bg-offset-y-input', bc.textBgOffsetY || 0);
+    syncRangeAndInput('text-bg-blur', 'text-bg-blur-input', bc.textBgBlur || 0);
+
+    // 文字背景圆角
+    syncRangeAndInput('tbr-all-slider', 'tbr-all-input', bc.textBgRadius.all);
+
+    // 径向渐变参数
+    setInputValue('text-bg-radial-shape', bc.textBgRadialShape);
+    syncRangeAndInput('text-bg-radial-rx', 'text-bg-radial-rx-input', bc.textBgRadialRx || 60);
+    syncRangeAndInput('text-bg-radial-ry', 'text-bg-radial-ry-input', bc.textBgRadialRy || 45);
+    syncRangeAndInput('text-bg-radial-cx', 'text-bg-radial-cx-input', bc.textBgRadialCx || 50);
+    syncRangeAndInput('text-bg-radial-cy', 'text-bg-radial-cy-input', bc.textBgRadialCy || 50);
+    syncTextBgRadialPanel();
+
+    // ============ 4. 前缀/后缀开关 ============
+    setCheckbox('prefix-enable', bc.bubblePrefix.enabled);
+    const prefixSettings = document.getElementById('prefix-settings');
+    if (prefixSettings) prefixSettings.style.display = bc.bubblePrefix.enabled ? 'block' : 'none';
+    setInputValue('prefix-text', bc.bubblePrefix.text);
+    setInputValue('prefix-position', bc.bubblePrefix.position);
+    syncRangeAndInput('prefix-x', null, bc.bubblePrefix.x);
+    syncRangeAndInput('prefix-y', null, bc.bubblePrefix.y);
+    syncRangeAndInput('prefix-fontSize', null, bc.bubblePrefix.fontSize);
+    setInputValue('prefix-color', bc.bubblePrefix.color);
+    setInputValue('prefix-fontWeight', bc.bubblePrefix.fontWeight);
+
+    setCheckbox('suffix-enable', bc.bubbleSuffix.enabled);
+    const suffixSettings = document.getElementById('suffix-settings');
+    if (suffixSettings) suffixSettings.style.display = bc.bubbleSuffix.enabled ? 'block' : 'none';
+    setInputValue('suffix-text', bc.bubbleSuffix.text);
+    setInputValue('suffix-position', bc.bubbleSuffix.position);
+    syncRangeAndInput('suffix-x', null, bc.bubbleSuffix.x);
+    syncRangeAndInput('suffix-y', null, bc.bubbleSuffix.y);
+    syncRangeAndInput('suffix-fontSize', null, bc.bubbleSuffix.fontSize);
+    setInputValue('suffix-color', bc.bubbleSuffix.color);
+    setInputValue('suffix-fontWeight', bc.bubbleSuffix.fontWeight);
+
+    // ============ 5. 头像设置 ============
+    syncRangeAndInput('avatar-size-slider', 'avatar-size-input', sc.avatar.size);
+    syncRangeAndInput('avatar-radius-slider', 'avatar-radius-input', sc.avatar.radius);
+    syncRangeAndInput('avatar-pos-x-slider', 'avatar-pos-x-input', sc.avatar.position.x);
+    syncRangeAndInput('avatar-pos-y-slider', 'avatar-pos-y-input', sc.avatar.position.y);
+
+    // 头像显示模式
+    setInputValue('avatar-display-mode', sc.avatar.displayMode || 'all');
+
+    // 头像框
+    setInputValue('avatar-frame-url', sc.avatar.frameUrl || '');
+    const fpText1 = document.getElementById('frame-position-text');
+    const fpText2 = document.getElementById('frame-position-text2');
+    const fpLabel = sc.avatar.framePosition === 'before' ? '::before（底层）' : '::after（顶层）';
+    if (fpText1) fpText1.textContent = fpLabel;
+    if (fpText2) fpText2.textContent = fpLabel;
+
     // 头像阴影
-    const shX = document.getElementById('avatar-shadow-x');
-    const shXI = document.getElementById('avatar-shadow-x-input');
-    const shY = document.getElementById('avatar-shadow-y');
-    const shYI = document.getElementById('avatar-shadow-y-input');
-    const shBlur = document.getElementById('avatar-shadow-blur');
-    const shBlurI = document.getElementById('avatar-shadow-blur-input');
-    const shSpread = document.getElementById('avatar-shadow-spread');
-    const shSpreadI = document.getElementById('avatar-shadow-spread-input');
-    const shOpacity = document.getElementById('avatar-shadow-opacity');
+    setCheckbox('avatar-shadow-enable', sc.avatar.shadow.enabled);
+    setInputValue('avatar-shadow-type', sc.avatar.shadow.type);
+    setInputValue('avatar-shadow-color', sc.avatar.shadow.color);
+    const shColorHex = document.getElementById('avatar-shadow-color-hex');
+    if (shColorHex) shColorHex.value = sc.avatar.shadow.color;
+
+    syncRangeAndInput('avatar-shadow-opacity', null, sc.avatar.shadow.opacity);
     const shOpVal = document.getElementById('avatar-shadow-opacity-value');
-    if (shX) shX.value = sc.avatar.shadow.x;
-    if (shXI) shXI.value = sc.avatar.shadow.x;
-    if (shY) shY.value = sc.avatar.shadow.y;
-    if (shYI) shYI.value = sc.avatar.shadow.y;
-    if (shBlur) shBlur.value = sc.avatar.shadow.blur;
-    if (shBlurI) shBlurI.value = sc.avatar.shadow.blur;
-    if (shSpread) shSpread.value = sc.avatar.shadow.spread;
-    if (shSpreadI) shSpreadI.value = sc.avatar.shadow.spread;
-    if (shOpacity) shOpacity.value = sc.avatar.shadow.opacity;
     if (shOpVal) shOpVal.textContent = sc.avatar.shadow.opacity + '%';
-    
-    // 表情/图片尺寸
-    const emojiSize = document.getElementById('emoji-max-size');
-    const emojiVal = document.getElementById('emoji-max-size-val');
-    if (emojiSize) emojiSize.value = bc.emojiMaxSize;
-    if (emojiVal) emojiVal.textContent = bc.emojiMaxSize + 'px';
-    
-    const imgW = document.getElementById('image-max-w');
+
+    syncRangeAndInput('avatar-shadow-x', 'avatar-shadow-x-input', sc.avatar.shadow.x);
+    syncRangeAndInput('avatar-shadow-y', 'avatar-shadow-y-input', sc.avatar.shadow.y);
+    syncRangeAndInput('avatar-shadow-blur', 'avatar-shadow-blur-input', sc.avatar.shadow.blur);
+    syncRangeAndInput('avatar-shadow-spread', 'avatar-shadow-spread-input', sc.avatar.shadow.spread);
+    setInputValue('avatar-shadow-direction', sc.avatar.shadow.direction);
+
+    // 阴影类型切换显示
+    const solidSection = document.getElementById('shadow-solid-section');
+    const gradSection = document.getElementById('shadow-gradient-section');
+    if (solidSection) solidSection.style.display = sc.avatar.shadow.type === 'solid' ? 'block' : 'none';
+    if (gradSection) gradSection.style.display = sc.avatar.shadow.type === 'gradient' ? 'block' : 'none';
+    if (sc.avatar.shadow.type === 'gradient') {
+        renderShadowGradientColors();
+        updateGradientPreview();
+    }
+
+    // ============ 6. 表情包 ============
+    setCheckbox('emoji-show-bubble', bc.emojiShowBubble);
+    syncRangeAndInput('emoji-max-size', null, bc.emojiMaxSize);
+    const emojiSizeVal = document.getElementById('emoji-max-size-val');
+    if (emojiSizeVal) emojiSizeVal.textContent = bc.emojiMaxSize + 'px';
+    syncRangeAndInput('emoji-radius', 'emoji-radius-input', bc.emojiRadius || 8);
+
+    // ============ 7. 图片消息 ============
+    setCheckbox('image-show-bubble', bc.imageShowBubble);
+    syncRangeAndInput('image-max-w', null, bc.imageMaxWidth);
     const imgWVal = document.getElementById('image-max-w-val');
-    if (imgW) imgW.value = bc.imageMaxWidth;
     if (imgWVal) imgWVal.textContent = bc.imageMaxWidth + 'px';
-    
-    const imgH = document.getElementById('image-max-h');
+
+    syncRangeAndInput('image-max-h', null, bc.imageMaxHeight);
     const imgHVal = document.getElementById('image-max-h-val');
-    if (imgH) imgH.value = bc.imageMaxHeight;
     if (imgHVal) imgHVal.textContent = bc.imageMaxHeight + 'px';
-    
-    const imgR = document.getElementById('image-radius');
+
+    syncRangeAndInput('image-radius', null, bc.imageRadius);
     const imgRVal = document.getElementById('image-radius-val');
-    if (imgR) imgR.value = bc.imageRadius;
     if (imgRVal) imgRVal.textContent = bc.imageRadius + 'px';
-    
-    const emojiRadius = document.getElementById('emoji-radius');
-const emojiRadiusInput = document.getElementById('emoji-radius-input');
-if (emojiRadius) emojiRadius.value = bc.emojiRadius || 8;
-if (emojiRadiusInput) emojiRadiusInput.value = bc.emojiRadius || 8;
 
-    // 语音
-    const voiceWC = document.getElementById('voice-wave-count');
+    // 图片占位类型
+    document.querySelectorAll('.placeholder-type-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.type === bc.placeholderType);
+    });
+    document.querySelectorAll('.placeholder-config-section').forEach(sec => sec.classList.remove('show'));
+    const placeholderTarget = document.getElementById('placeholder-' + bc.placeholderType + '-config');
+    if (placeholderTarget) placeholderTarget.classList.add('show');
+
+    // 描述面板
+    syncRangeAndInput('image-desc-radius', null, bc.descRadius);
+    const descRVal = document.getElementById('image-desc-radius-val');
+    if (descRVal) descRVal.textContent = bc.descRadius + 'px';
+    syncRangeAndInput('image-desc-border-w', null, bc.descBorderWidth);
+    const descBWVal = document.getElementById('image-desc-border-w-val');
+    if (descBWVal) descBWVal.textContent = bc.descBorderWidth + 'px';
+    syncRangeAndInput('image-desc-fontsize', 'image-desc-fontsize-input', bc.descFontSize || 14);
+
+    // ============ 8. 语音消息 ============
+    // 波形来源
+    const waveSourceBtns = document.querySelectorAll('[name="voice-wave-source"]');
+    waveSourceBtns.forEach(btn => {
+        if (btn.value === bc.voiceWaveSource) btn.checked = true;
+    });
+    const builtinSection = document.getElementById('wave-style-grid');
+    const customSection = document.getElementById('voice-custom-icon-section');
+    const waveCountRow = document.getElementById('voice-wave-count')?.closest('.editor-row');
+    if (bc.voiceWaveSource === 'custom') {
+        if (builtinSection) builtinSection.style.display = 'none';
+        if (customSection) customSection.style.display = 'block';
+        if (waveCountRow) waveCountRow.style.display = 'none';
+    } else {
+        if (builtinSection) builtinSection.style.display = 'flex';
+        if (customSection) customSection.style.display = 'none';
+        if (waveCountRow) waveCountRow.style.display = 'flex';
+    }
+
+    // 波形样式
+    document.querySelectorAll('#wave-style-grid .wave-style-option').forEach(el => {
+        el.classList.toggle('active', el.dataset.style === bc.voiceWaveStyle);
+    });
+
+    syncRangeAndInput('voice-wave-count', null, bc.voiceWaveCount);
     const voiceWCVal = document.getElementById('voice-wave-count-val');
-    if (voiceWC) voiceWC.value = bc.voiceWaveCount;
     if (voiceWCVal) voiceWCVal.textContent = bc.voiceWaveCount;
-    
-    // 气泡装饰
-    const decoW = document.getElementById('bubble-deco-w');
-    const decoWVal = document.getElementById('bubble-deco-w-val');
-    if (decoW) decoW.value = bc.decoWidth;
-    if (decoWVal) decoWVal.textContent = bc.decoWidth + 'px';
-    
-    const decoH = document.getElementById('bubble-deco-h');
-    const decoHVal = document.getElementById('bubble-deco-h-val');
-    if (decoH) decoH.value = bc.decoHeight;
-    if (decoHVal) decoHVal.textContent = bc.decoHeight + 'px';
-    
-    const decoX = document.getElementById('bubble-deco-x');
-    const decoXVal = document.getElementById('bubble-deco-x-val');
-    if (decoX) decoX.value = bc.decoX;
-    if (decoXVal) decoXVal.textContent = bc.decoX + 'px';
-    
-    const decoY = document.getElementById('bubble-deco-y');
-    const decoYVal = document.getElementById('bubble-deco-y-val');
-    if (decoY) decoY.value = bc.decoY;
-    if (decoYVal) decoYVal.textContent = bc.decoY + 'px';
 
-// 描述字体大小
-const descFS = document.getElementById('image-desc-fontsize');
-const descFSI = document.getElementById('image-desc-fontsize-input');
-if (descFS) descFS.value = bc.descFontSize || 14;
-if (descFSI) descFSI.value = bc.descFontSize || 14;
+    // 语音文字位置
+    setInputValue('voice-text-position', bc.voiceTextPosition);
+    syncRangeAndInput('voice-text-fontsize', null, bc.voiceTextFontSize);
+    const vtfsVal = document.getElementById('voice-text-fontsize-val');
+    if (vtfsVal) vtfsVal.textContent = bc.voiceTextFontSize + 'px';
+    syncRangeAndInput('voice-text-radius', null, bc.voiceTextRadius);
+    const vtrVal = document.getElementById('voice-text-radius-val');
+    if (vtrVal) vtrVal.textContent = bc.voiceTextRadius + 'px';
+    syncRangeAndInput('voice-text-border-w', null, bc.voiceTextBorderWidth);
+    const vtbwVal = document.getElementById('voice-text-border-w-val');
+    if (vtbwVal) vtbwVal.textContent = bc.voiceTextBorderWidth + 'px';
 
-// 聊天区域比例
-const chatScaleSlider = document.getElementById('chat-area-scale-slider');
-const chatScaleInput = document.getElementById('chat-area-scale-input');
-if (chatScaleSlider) chatScaleSlider.value = sc.chatArea.scale || 100;
-if (chatScaleInput) chatScaleInput.value = sc.chatArea.scale || 100;
+    // 自定义波形图标
+    setInputValue('voice-custom-icon-url', bc.voiceCustomIcon.url);
+    syncRangeAndInput('voice-custom-icon-width', null, bc.voiceCustomIcon.width);
+    syncRangeAndInput('voice-custom-icon-height', null, bc.voiceCustomIcon.height);
+    setInputValue('voice-custom-icon-mode', bc.voiceCustomIcon.renderMode);
 
-renderBubbleDecoList();
+    // ============ 9. 小尾巴 ============
+    setCheckbox('tail-enable', tc.enabled);
+    const tailSettings = document.getElementById('tail-settings');
+    if (tailSettings) tailSettings.style.display = tc.enabled ? 'block' : 'none';
 
-const topbarBgUrlInput = document.getElementById('topbar-bg-url');
-    if (topbarBgUrlInput) topbarBgUrlInput.value = sc.topBar?.container?.bgUrl || '';
+    // 小尾巴预设
+    document.querySelectorAll('#tail-preset-grid .wave-style-option').forEach(el => {
+        el.classList.toggle('active', el.dataset.style === tc.preset);
+    });
+    const tailCustomSection = document.getElementById('tail-custom-section');
+    if (tailCustomSection) tailCustomSection.style.display = tc.preset === 'custom' ? 'block' : 'none';
 
-    const bottombarBgUrlInput = document.getElementById('bottombar-bg-url');
-    if (bottombarBgUrlInput) bottombarBgUrlInput.value = sc.bottomBar?.container?.bgUrl || '';
-    
+    setInputValue('tail-img-url', tc.imgUrl);
+    setInputValue('tail-anchor', tc.anchor);
+    setInputValue('tail-pseudo', tc.pseudo);
+    setCheckbox('tail-auto-mirror', tc.autoMirror);
+    syncRangeAndInput('tail-width', 'tail-width-input', tc.width);
+    syncRangeAndInput('tail-height', 'tail-height-input', tc.height);
+    syncRangeAndInput('tail-offset-x', 'tail-offset-x-input', tc.offsetX);
+    syncRangeAndInput('tail-offset-y', 'tail-offset-y-input', tc.offsetY);
+    setInputValue('tail-flip', tc.flip);
+    setInputValue('tail-custom-css', tc.customCss);
+
+    // ============ 10. 引用消息 ============
+    // 预设
+    document.querySelectorAll('#reply-preset-grid .wave-style-option').forEach(el => {
+        el.classList.toggle('active', el.dataset.style === bc.replyPreset);
+    });
+    syncReplyUIControls();
+
+    // ============ 11. 转账卡片 ============
+    syncRangeAndInput('transfer-width', 'transfer-width-input', bc.transferWidth);
+    syncRangeAndInput('transfer-height', 'transfer-height-input', bc.transferHeight);
+    syncRangeAndInput('transfer-radius', 'transfer-radius-input', bc.transferRadius);
+    syncRangeAndInput('transfer-border-w', 'transfer-border-w-input', bc.transferBorderWidth);
+
+    // 转账背景图开关
+    setCheckbox('transfer-bg-image-toggle', bc.transferBgImageEnabled);
+    const transBgUrlSection = document.getElementById('trans-bg-url-section');
+    const transBgColorSection = document.getElementById('trans-bg-color-section');
+    if (transBgUrlSection) transBgUrlSection.style.display = bc.transferBgImageEnabled ? 'block' : 'none';
+    if (transBgColorSection) transBgColorSection.style.display = bc.transferBgImageEnabled ? 'none' : 'block';
+
+    // 转账各元素可见性
+    setCheckbox('trans-title-visible', bc.transferTitleVisible);
+    setCheckbox('trans-amount-visible', bc.transferAmountVisible);
+    setCheckbox('trans-note-visible', bc.transferNoteVisible);
+    setCheckbox('trans-status-visible', bc.transferStatusVisible);
+
+    const detailIds = ['trans-title-detail', 'trans-amount-detail', 'trans-note-detail', 'trans-status-detail'];
+    const detailFlags = [bc.transferTitleVisible, bc.transferAmountVisible, bc.transferNoteVisible, bc.transferStatusVisible];
+    detailIds.forEach((id, i) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = detailFlags[i] ? 'block' : 'none';
+    });
+
+    // 转账文字内容
+    setInputValue('trans-title-sent', bc.transferTitleSent);
+    setInputValue('trans-title-recv', bc.transferTitleRecv);
+    setInputValue('trans-amount-sent', bc.transferAmountSent);
+    setInputValue('trans-amount-recv', bc.transferAmountRecv);
+    setInputValue('trans-note-sent', bc.transferNoteSent);
+    setInputValue('trans-note-recv', bc.transferNoteRecv);
+    setInputValue('trans-status-sent', bc.transferStatusSent);
+    setInputValue('trans-status-recv', bc.transferStatusRecv);
+
+    // 转账元素偏移
+    syncRangeAndInput('trans-title-x', 'trans-title-x-input', bc.transferTitleX);
+    syncRangeAndInput('trans-title-y', 'trans-title-y-input', bc.transferTitleY);
+    setInputValue('trans-title-layer', bc.transferTitleLayer);
+    syncRangeAndInput('trans-amount-x', 'trans-amount-x-input', bc.transferAmountX);
+    syncRangeAndInput('trans-amount-y', 'trans-amount-y-input', bc.transferAmountY);
+    setInputValue('trans-amount-layer', bc.transferAmountLayer);
+    syncRangeAndInput('trans-note-x', 'trans-note-x-input', bc.transferNoteX);
+    syncRangeAndInput('trans-note-y', 'trans-note-y-input', bc.transferNoteY);
+    setInputValue('trans-note-layer', bc.transferNoteLayer);
+    syncRangeAndInput('trans-status-x', 'trans-status-x-input', bc.transferStatusX);
+    syncRangeAndInput('trans-status-y', 'trans-status-y-input', bc.transferStatusY);
+    setInputValue('trans-status-layer', bc.transferStatusLayer);
+
+    // ============ 12. 系统消息 ============
+    syncRangeAndInput('system-font-size', 'system-font-size-input', sc.system.fontSize);
+    setInputValue('system-font-weight', sc.system.fontWeight);
+    syncRangeAndInput('system-radius', 'system-radius-input', sc.system.radius);
+    syncRangeAndInput('system-pad-x', 'system-pad-x-input', sc.system.padX);
+    syncRangeAndInput('system-pad-y', 'system-pad-y-input', sc.system.padY);
+    syncRangeAndInput('system-border-w', 'system-border-w-input', sc.system.borderWidth);
+
+    // 系统消息背景模式
+    const sysBgColorSection = document.getElementById('system-bg-color-section');
+    const sysBgUrlSection = document.getElementById('system-bg-url-section');
+    if (sysBgColorSection) sysBgColorSection.style.display = sc.system.useColorBg !== false ? 'block' : 'none';
+    if (sysBgUrlSection) sysBgUrlSection.style.display = sc.system.useColorBg === false ? 'block' : 'none';
+    setInputValue('system-bg-url', sc.system.bgUrl);
+    setInputValue('system-bg-size', sc.system.bgSize);
+
+    // ============ 13. 聊天区域 ============
+    syncRangeAndInput('chat-pad-t', null, sc.chatArea.padding.t);
+    syncRangeAndInput('chat-pad-b', null, sc.chatArea.padding.b);
+    syncRangeAndInput('chat-pad-l', null, sc.chatArea.padding.l);
+    syncRangeAndInput('chat-pad-r', null, sc.chatArea.padding.r);
+    syncRangeAndInput('chat-area-scale-slider', 'chat-area-scale-input', sc.chatArea.scale || 100);
+    setInputValue('chat-area-bg-url', sc.chatArea.bgUrl || '');
+
+    // ============ 14. 顶栏 ============
+    syncRangeAndInput('topbar-height', 'topbar-height-input', sc.topBar.container?.height || 60);
+    setInputValue('topbar-border', sc.topBar.container?.border || '1px solid #e0e0e0');
+    setInputValue('topbar-bg-url', sc.topBar.container?.bgUrl || '');
+
+    syncRangeAndInput('topbar-back-x', 'topbar-back-x-input', sc.topBar.backBtn?.x || 0);
+    syncRangeAndInput('topbar-back-y', 'topbar-back-y-input', sc.topBar.backBtn?.y || 0);
+    syncRangeAndInput('topbar-back-size', 'topbar-back-size-input', sc.topBar.backBtn?.size || 28);
+
+    syncRangeAndInput('topbar-title-x', 'topbar-title-x-input', sc.topBar.title?.x || 0);
+    syncRangeAndInput('topbar-title-y', 'topbar-title-y-input', sc.topBar.title?.y || 0);
+    syncRangeAndInput('topbar-title-size', 'topbar-title-size-input', sc.topBar.title?.size || 18);
+
+    syncRangeAndInput('topbar-offline-x', 'topbar-offline-x-input', sc.topBar.offlineBtn?.x || 0);
+    syncRangeAndInput('topbar-offline-y', 'topbar-offline-y-input', sc.topBar.offlineBtn?.y || 0);
+    syncRangeAndInput('topbar-offline-size', 'topbar-offline-size-input', sc.topBar.offlineBtn?.size || 22);
+
+    syncRangeAndInput('topbar-more-x', 'topbar-more-x-input', sc.topBar.moreBtn?.x || 0);
+    syncRangeAndInput('topbar-more-y', 'topbar-more-y-input', sc.topBar.moreBtn?.y || 0);
+    syncRangeAndInput('topbar-more-size', 'topbar-more-size-input', sc.topBar.moreBtn?.size || 22);
+
+    // ============ 15. 底栏 ============
+    syncRangeAndInput('bottombar-height', 'bottombar-height-input', sc.bottomBar.container?.height || 50);
+    setInputValue('bottombar-border', sc.bottomBar.container?.border || '1px solid #E0E0E0');
+    setInputValue('bottombar-bg-url', sc.bottomBar.container?.bgUrl || '');
+
+    // 工具按钮
+    syncRangeAndInput('bottombar-tool-x', 'bottombar-tool-x-input', sc.bottomBar.toolBtn?.x || 0);
+    syncRangeAndInput('bottombar-tool-y', 'bottombar-tool-y-input', sc.bottomBar.toolBtn?.y || 0);
+    syncRangeAndInput('bottombar-tool-width', 'bottombar-tool-width-input', sc.bottomBar.toolBtn?.width || 28);
+    syncRangeAndInput('bottombar-tool-height', 'bottombar-tool-height-input', sc.bottomBar.toolBtn?.height || 28);
+    syncRangeAndInput('bottombar-tool-radius', 'bottombar-tool-radius-input', sc.bottomBar.toolBtn?.radius || 50);
+    syncRangeAndInput('bottombar-tool-size', 'bottombar-tool-size-input', sc.bottomBar.toolBtn?.size || 28);
+
+    // 输入框
+    syncRangeAndInput('bottombar-input-radius', 'bottombar-input-radius-input', sc.bottomBar.input?.radius || 8);
+    syncRangeAndInput('bottombar-input-height', 'bottombar-input-height-input', sc.bottomBar.input?.height || 36);
+    setInputValue('bottombar-input-placeholder', sc.bottomBar.input?.placeholder || '输入消息...');
+    setInputValue('bottombar-input-placeholder-color', sc.bottomBar.input?.placeholderColor || '#B0B0B0');
+    syncRangeAndInput('bottombar-input-border-w', 'bottombar-input-border-w-input', sc.bottomBar.input?.borderWidth || 0);
+
+    // 续写按钮
+    syncRangeAndInput('bottombar-resume-x', 'bottombar-resume-x-input', sc.bottomBar.resumeBtn?.x || 0);
+    syncRangeAndInput('bottombar-resume-y', 'bottombar-resume-y-input', sc.bottomBar.resumeBtn?.y || 0);
+    syncRangeAndInput('bottombar-resume-width', 'bottombar-resume-width-input', sc.bottomBar.resumeBtn?.width || 36);
+    syncRangeAndInput('bottombar-resume-height', 'bottombar-resume-height-input', sc.bottomBar.resumeBtn?.height || 36);
+    syncRangeAndInput('bottombar-resume-radius', 'bottombar-resume-radius-input', sc.bottomBar.resumeBtn?.radius || 50);
+    syncRangeAndInput('bottombar-resume-size', 'bottombar-resume-size-input', sc.bottomBar.resumeBtn?.size || 18);
+
+    // 发送按钮
+    syncRangeAndInput('bottombar-send-x', 'bottombar-send-x-input', sc.bottomBar.sendBtn?.x || 0);
+    syncRangeAndInput('bottombar-send-y', 'bottombar-send-y-input', sc.bottomBar.sendBtn?.y || 0);
+    syncRangeAndInput('bottombar-send-width', 'bottombar-send-width-input', sc.bottomBar.sendBtn?.width || 50);
+    syncRangeAndInput('bottombar-send-height', 'bottombar-send-height-input', sc.bottomBar.sendBtn?.height || 30);
+    syncRangeAndInput('bottombar-send-radius', 'bottombar-send-radius-input', sc.bottomBar.sendBtn?.radius || 25);
+    syncRangeAndInput('bottombar-send-size', 'bottombar-send-size-input', sc.bottomBar.sendBtn?.size || 14);
+    setInputValue('bottombar-send-text', sc.bottomBar.sendBtn?.text || '发送');
+
+    // ============ 16. 工具栏布局 ============
+    syncRangeAndInput('toolbar-columns', null, toolbarLayout.columns);
+    const colVal = document.getElementById('toolbar-columns-val');
+    if (colVal) colVal.textContent = toolbarLayout.columns;
+
+    syncRangeAndInput('toolbar-gap', null, toolbarLayout.gap);
+    const gapVal = document.getElementById('toolbar-gap-val');
+    if (gapVal) gapVal.textContent = toolbarLayout.gap + 'px';
+
+    syncRangeAndInput('toolbar-padding', null, toolbarLayout.padding);
+    const padVal = document.getElementById('toolbar-padding-val');
+    if (padVal) padVal.textContent = toolbarLayout.padding + 'px';
+
+    syncRangeAndInput('toolbar-maxheight', null, toolbarLayout.maxHeight);
+    const mhVal = document.getElementById('toolbar-maxheight-val');
+    if (mhVal) mhVal.textContent = toolbarLayout.maxHeight + 'px';
+
+    syncRangeAndInput('toolbar-icon-size', null, toolbarLayout.iconSize);
+    const isVal = document.getElementById('toolbar-icon-size-val');
+    if (isVal) isVal.textContent = toolbarLayout.iconSize + 'px';
+
+    syncRangeAndInput('toolbar-icon-radius', null, toolbarLayout.iconRadius);
+    const irVal = document.getElementById('toolbar-icon-radius-val');
+    if (irVal) irVal.textContent = toolbarLayout.iconRadius + '%';
+
+    syncRangeAndInput('toolbar-label-size', null, toolbarLayout.labelSize);
+    const lsVal = document.getElementById('toolbar-label-size-val');
+    if (lsVal) lsVal.textContent = toolbarLayout.labelSize + 'px';
+
+    // ============ 17. 装饰列表重新渲染 ============
+    renderBubbleDecoList();
+    renderTransferDecoList();
+    renderDecorationList();
+
+    // ============ 18. 应用全局布局 ============
+    applyGlobalLayoutToPreview();
+}
+
+// 辅助：设置 checkbox 的选中状态
+function setCheckbox(id, checked) {
+    const el = document.getElementById(id);
+    if (el) el.checked = !!checked;
+}
+
+// 辅助：仅切换四边模式的 UI 显示（不触发 updatePreview）
+function toggleFourSidesUIOnly(prop, unified) {
+    const uniformDiv = document.getElementById(`${prop}-uniform`);
+    const individualDiv = document.getElementById(`${prop}-individual`);
+    if (uniformDiv) uniformDiv.style.display = unified ? 'block' : 'none';
+    if (individualDiv) individualDiv.style.display = unified ? 'none' : 'block';
 }
 
 function updateUndoRedoButtons() {
     const undoBtn = document.getElementById('undoBtn');
     const redoBtn = document.getElementById('redoBtn');
-    if (undoBtn) undoBtn.disabled = undoStack.length === 0;
-    if (redoBtn) redoBtn.disabled = redoStack.length === 0;
+    if (undoBtn) {
+        undoBtn.disabled = undoStack.length === 0;
+        undoBtn.title = undoStack.length > 0 ? `撤回 (${undoStack.length}步)` : '无可撤回';
+    }
+    if (redoBtn) {
+        redoBtn.disabled = redoStack.length === 0;
+        redoBtn.title = redoStack.length > 0 ? `重做 (${redoStack.length}步)` : '无可重做';
+    }
 }
 
 // 预览区+按钮绑定
@@ -6581,11 +7026,11 @@ function syncRangeAndInput(rangeId, inputId, val) {
 
 let _undoOnPointerUp = null;
 document.addEventListener('pointerup', function() {
-    if (_initPhase) return;
-    clearTimeout(_undoOnPointerUp);
-    _undoOnPointerUp = setTimeout(function() {
-        var currentState = getGlobalState();
-        if (currentState !== _lastSavedState) {
+    if (_initPhase || _isRestoringState) return;  // ★ 添加 _isRestoringState 检查
+    setTimeout(() => {
+        if (_isRestoringState) return;  // ★ 二次检查
+        const currentState = getGlobalState();
+        if (currentState && currentState !== _lastSavedState) {
             if (_lastSavedState) {
                 undoStack.push(_lastSavedState);
                 if (undoStack.length > MAX_UNDO) undoStack.shift();
@@ -6594,8 +7039,8 @@ document.addEventListener('pointerup', function() {
             _lastSavedState = currentState;
             updateUndoRedoButtons();
         }
-    }, 300);
-});
+    }, 500);
+}, { passive: true });
 
 /* ================== 新增：全局布局 更新逻辑 ================== */
 
@@ -7396,16 +7841,22 @@ if (hasHeader) {
     let headerHtml = '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;white-space:nowrap;overflow:hidden;">';
     
     if (showSender) {
+        // 如果不显示时间，用 word-spacing 隐藏方式来保持布局一致
+        const useWordSpacing = !showTime && bc.replyTimeHideMethod === 'word-spacing';
+        const senderExtra = useWordSpacing ? 'word-spacing:-9999px;overflow:hidden;padding-right:60px;margin-right:-60px;' : '';
+        
         headerHtml += '<span style="font-weight:600;font-size:' + Math.max(10, (bc.replyFontSize || 12) - 1) + 'px;flex-shrink:0;'
-            + 'padding-right:60px;margin-right:-60px;overflow:hidden;'
-            + 'word-spacing:-9999px;'
+            + senderExtra
             + senderStyle + '">' + senderName + '</span>';
     }
     
+    // ★★★ 修复：showTime=true 时正常显示时间戳 ★★★
     if (showTime) {
-        headerHtml += '<span style="font-size:0;line-height:0;width:0;height:0;overflow:hidden;position:absolute;left:-9999px;opacity:0;'
+        headerHtml += '<span style="font-size:' + Math.max(9, (bc.replyFontSize || 12) - 2) + 'px;'
+            + 'margin-left:auto;display:block;flex-shrink:0;'
             + timeStyle + '">10:00</span>';
     }
+    
     headerHtml += '</div>';
 
     const msgHtml = '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:' + (bc.replyFontSize || 12) + 'px;line-height:1.3;' + msgStyle + '">' + msgText + '</div>';
@@ -7430,7 +7881,191 @@ if (hasHeader) {
     + outerJumpDecoHtml
     + '</div>';
 }
+/* === 添加到被插入的 index.js 的最尾部即可 === */
 
+(function initEveCorePatch() {
+    // 强制接管子 Tab 下的消息预览隔离引擎
+    window.generatePreviewBySubTab = function(side) {
+        const s = (side === 'overall' || side === 'preview') ? 'overall' : side;
+        switch (currentSubTab) {
+            case 'avatar':
+            case 'bubble':
+            case 'toolbar':
+            case 'chatarea':
+            case 'topbar':
+            case 'bottombar':
+                return s === 'overall' ? generateAllMessages() : generateAllMessagesForSide(s);
+            case 'reply':
+                return s === 'overall' ? generateReplyPreview('received') + generateReplyPreview('sent') : generateReplyPreview(s);
+            case 'transfer':
+                return s === 'overall' ? generateTransferPreview('received') + generateTransferPreview('sent') : generateTransferPreview(s);
+            case 'system':
+                return generateSystemPreview();
+            default:
+                return s === 'overall' ? generateTextPreview('received') + generateTextPreview('sent') : generateTextPreview(s);
+        }
+    };
+
+    // ★★★ 修复核心：彻底重写 updatePreview，解决滑块和颜色不即时响应的问题 ★★★
+    let _renderRAF = null; // 用 requestAnimationFrame 替代无节制调用
+    
+    window.updatePreview = function() {
+        // 初始化阶段完全跳过
+        if (_initPhase) return;
+        // 状态恢复阶段由外部手动调用，这里不拦截
+        if (_isRestoringState) return;
+        
+        // ===== 1. 立即同步分支数据（不做延迟！） =====
+        if (branchDB.overall) {
+            const snap = snapshotCore();
+            
+            // 判断是否有真实改动（对比当前活跃分支）
+            const oldStr = JSON.stringify(branchDB[activeBranch]);
+            const newStr = JSON.stringify(snap);
+            const isActuallyModified = newStr !== oldStr;
+            
+            // 无条件保存当前分支
+            branchDB[activeBranch] = JSON.parse(JSON.stringify(snap));
+            
+            // 整体视图下的改动同步到两侧
+            if (activeBranch === 'overall' && isActuallyModified) {
+                branchDB.sent = JSON.parse(JSON.stringify(snap));
+                branchDB.received = JSON.parse(JSON.stringify(snap));
+            }
+        }
+        
+        // ===== 2. 使用 RAF 合并渲染，防止高频滑块卡顿但保证即时性 =====
+        if (_renderRAF) cancelAnimationFrame(_renderRAF);
+        _renderRAF = requestAnimationFrame(function() {
+            _renderRAF = null;
+            _doRenderPreview();
+        });
+    };
+    
+    // 真正执行渲染的内部函数
+function _doRenderPreview() {
+    const previewMessages = document.getElementById('previewMessages');
+    if (!previewMessages) return;
+    
+    // ★★★ 修复：渲染前保存所有展开状态 ★★★
+    const expandedStates = {};
+    
+    // 保存图片描述展开状态
+    previewMessages.querySelectorAll('.preview-dreamy-photo-container').forEach((el, i) => {
+        const overlay = el.querySelector('.preview-photo-text-overlay');
+        if (overlay && overlay.classList.contains('visible')) {
+            expandedStates['dreamy-' + i] = true;
+        }
+    });
+    
+    // 保存语音转文字展开状态
+    previewMessages.querySelectorAll('.preview-voice-message-container').forEach((el, i) => {
+        const textContent = el.querySelector('.preview-voice-text-content');
+        if (textContent && textContent.classList.contains('visible')) {
+            expandedStates['voice-' + i] = true;
+        }
+    });
+    
+    // 执行渲染
+    if (typeof currentMainTab !== 'undefined' && currentMainTab !== 'preview' && currentMainTab !== 'export') {
+        previewMessages.innerHTML = window.generatePreviewBySubTab(currentMainTab);
+    } else {
+        previewMessages.innerHTML = generateAllMessages();
+    }
+    
+    // ★★★ 修复：渲染后恢复展开状态 ★★★
+    // 恢复图片描述
+    previewMessages.querySelectorAll('.preview-dreamy-photo-container').forEach((el, i) => {
+        if (expandedStates['dreamy-' + i]) {
+            const overlay = el.querySelector('.preview-photo-text-overlay');
+            if (overlay) overlay.classList.add('visible');
+        }
+    });
+    
+    // 恢复语音转文字
+    previewMessages.querySelectorAll('.preview-voice-message-container').forEach((el, i) => {
+        if (expandedStates['voice-' + i]) {
+            const textContent = el.querySelector('.preview-voice-text-content');
+            if (textContent) textContent.classList.add('visible');
+        }
+    });
+    
+    if (typeof renderPreviewToolbar === 'function') {
+        renderPreviewToolbar();
+    }
+    
+    // 同步应用全局布局
+    if (typeof applyGlobalLayoutToPreview === 'function') {
+        applyGlobalLayoutToPreview();
+    }
+}
+
+    // 将局部引用也指向新版本
+    updatePreview = window.updatePreview;
+
+    window.updateAvatarDisplayMode = function(mode) {
+        styleConfig.avatar.displayMode = mode;
+        updatePreview();
+    };
+    updateAvatarDisplayMode = window.updateAvatarDisplayMode;
+
+    setTimeout(() => {
+        updatePreview();
+    }, 100);
+})();
+
+/* === 针对头像和内嵌结构导致数据未同步修改隔离库的漏洞阻断 === */
+(function fixDeepPointerMemoryLeak() {
+    // 强制将分配器的传输级别设定为脱层深拷贝，彻底切断视图对数据源的指针污染
+    window.applyBranch = function(branch) {
+        if (!branch) return;
+        
+        // 我们写一个简单的深克隆覆盖器以替代原先的 Object.assign
+        const safeDeepAssign = (target, source) => {
+            for (let k in source) {
+                if (typeof source[k] === 'object' && source[k] !== null) {
+                    target[k] = JSON.parse(JSON.stringify(source[k]));
+                } else {
+                    target[k] = source[k];
+                }
+            }
+        };
+        
+        safeDeepAssign(bubbleConfig, branch.bc);
+        safeDeepAssign(styleConfig, branch.sc);
+        safeDeepAssign(colorPickerRegistry, branch.cp);
+        safeDeepAssign(shadowPickerRegistry, branch.sp);
+    };
+
+    // 覆盖全局原定义
+    // 因为原代码是 function applyBranch(branch)声明的，这是安全的可覆盖行为
+    applyBranch = window.applyBranch;
+    /* === 彻底治愈头像与局部UI指针同步失效的补丁 === */
+(function fixAvatarAndPointerLeaks() {
+    // 确保所有局部函数指针指向最新的全局版本
+    if (typeof window.updatePreview === 'function') {
+        updatePreview = window.updatePreview;
+    }
+    
+    window.updateAvatarDisplayMode = function(mode) {
+        styleConfig.avatar.displayMode = mode;
+        if (typeof updatePreview === 'function') updatePreview();
+    };
+    updateAvatarDisplayMode = window.updateAvatarDisplayMode;
+
+    const _origSyncAll = typeof syncAllUIControls === 'function' ? syncAllUIControls : null;
+    window.syncAllUIControls = function() {
+        if (_origSyncAll) _origSyncAll();
+        
+        const modeEl = document.getElementById('avatar-display-mode');
+        if (modeEl && styleConfig && styleConfig.avatar && styleConfig.avatar.displayMode) {
+            modeEl.value = styleConfig.avatar.displayMode;
+        }
+    };
+    syncAllUIControls = window.syncAllUIControls;
+})();
+
+// ================= 最底部初始唤醒渲染调用 =================
 renderBubbleDecoList();
 _initPhase = false;
 updateContent();
@@ -7439,3 +8074,9 @@ setTimeout(function() {
     captureInitialExportStates();
     _lastSavedState = getGlobalState();
 }, 200);
+    // 如果系统处于首屏状态或没有经过处理，这里帮其执行一次最规范的环境初始化
+    setTimeout(() => {
+         if (typeof updatePreview === 'function') updatePreview();
+    }, 150);
+})();
+
