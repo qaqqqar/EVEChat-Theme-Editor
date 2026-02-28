@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
     <script src="https://code.iconify.design/3/3.1.0/iconify.min.js"></script>
-    <link rel="stylesheet" href="eve.css">
+    <link rel="stylesheet" href="index.css">
 </head>
 <body>
 <!-- 自定义弹窗 -->
@@ -3139,7 +3139,7 @@
                         <option value="high">高</option>
                     </select>
                 </div>
-                <button class="editor-btn primary" onclick="generateEncrypted()">
+                <button按钮 class="editor-btn primary" onclick="generateEncrypted()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                     生成加密代码
                 </button>
@@ -3148,7 +3148,7 @@
         
         <!-- 导出折叠栏 -->
         <div class="collapse-section">
-            <div class="collapse-header" onclick="toggleCollapse(this)">
+            <div class="collapse-header" onclick="toggleCollapse切换折叠(this)">
                 <span class="collapse-title">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     导出
@@ -3157,23 +3157,22 @@
             </div>
             <div class="collapse-body">
                 <div class="editor-btn-row">
-                    <button class="editor-btn" onclick="copyToClipboard('encryptCodeArea')">
+                    <button按钮 class="editor-btn" onclick="copyToClipboard复制到剪贴板('encryptCodeArea')"><按钮 class="editor-btn" onclick="复制到剪贴板复制到剪贴板('encryptCodeArea')">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                         复制到剪切板
                     </button>
-                    <button class="editor-btn" onclick="exportToTxt('encryptCodeArea')">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    <button按钮 class="editor-btn" onclick="exportToTxt导出为Txt导出为Txt('encryptCodeArea')"><按钮 class="editor-btn" onclick="exportToTxt导出为Txt('encryptCodeArea')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><折线 点="14 2 14 8 20 8"/></svg>
                         导出为txt
                     </button>
-                    <button class="editor-btn" onclick="exportToDocx('encryptCodeArea')">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    <button class="editor-btn" onclick="exportToDocx导出为DocxexportToDocx 导出为DocxexportToDocx导出为DocxexportToDocx导出为DocxexportToDocx导出为DocxexportToDocx导出为DocxexportToDocx导出为DocxexportToDocx导出为Docx('encryptCodeArea')">
+                        <svg viewBox视图框="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><折线 点="14 2 14 8 20 8"/><线 x1="16" y1="13" x2="8" y2="13"/><线 x1="16" y1="17" x2="8" y2="17"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><折线 点="14 2 14 8 20 8"/><线 x1="16" y1="13" x2="8" y2="13"/><线 x1="16" y1="17" x2="8" y2="17"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><折线 点="14 2 14 8 20 8"/><线 x1="16" y1="13" x2="8" y2="13"/><线 x1="16" y1="17" x2="8" y2="17"/></svg>
                         导出为docx
                     </button>
                 </div>
             </div>
         </div>
     </div>
-</div>
-<script src="eve.js"></script>
+<script src="index.js"></script>
 </body>
 </html>
